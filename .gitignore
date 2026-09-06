@@ -3,3 +3,5 @@
 !cargo.toml
 !/src/
 !/src/*.rs
+!LICENSE
+!README.md
