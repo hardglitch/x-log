@@ -14,15 +14,8 @@ pub struct LogFile {
     file: File,
 }
 impl LogFile {
-    #[inline] pub fn path(&self) -> &PathBuf { &self.path }
-    #[inline] pub fn path_mut(&mut self) -> &mut PathBuf { &mut self.path }
-    #[inline] pub fn size(&self) -> u64 { self.size }
-    #[inline] pub fn size_mut(&mut self) -> &mut u64 { &mut self.size }
-    #[inline] pub fn file(&self) -> &File { &self.file }
-    #[inline] pub fn file_mut(&mut self) -> &mut File { &mut self.file }
-
 	#[inline]
-	pub fn write_entry(&mut self, args: Arguments) {
+	fn write_entry(&mut self, args: Arguments) {
 		let ts = Log::get_timestamp();
         let _ = self.file.write_all(format!("[{}]: ", ts).as_bytes());
         let _ = self.file.write_fmt(args);
@@ -91,6 +84,7 @@ impl Log {
             Err(e) => { eprintln!("{e}"); }
         }
     }
+	
     fn create_new_name(old_name: &str) -> Option<String> {
         let (base, ext) = old_name.rsplit_once(".")?;
         let base_wo_time = if let Some(b) = base.rsplit_once("-").map(|x| x.0) { b } else { base };
@@ -113,7 +107,6 @@ impl Log {
 	#[inline]
     fn get_timestamp() -> String {
         let now = time::OffsetDateTime::now_utc();
-        // Use unwrap because RFC3339 is valid always
         now.format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "0000-00-00 00:00:00".to_string())
     }
@@ -125,10 +118,10 @@ impl Log {
 
         if let Some(m) = LOG_FILE.get() &&
 		   let Ok(log_file) = m.try_lock() &&
-           let Ok(meta) = log_file.file().metadata()
+           let Ok(meta) = log_file.file.metadata()
 		{
             meta_len = meta.len();
-            log_file_size = log_file.size();
+            log_file_size = log_file.size;
         }
 
         if meta_len > log_file_size {
@@ -137,7 +130,7 @@ impl Log {
             if let Some(m) = LOG_FILE.get() &&
 	           let Ok(log_file) = m.try_lock()
             {
-                old_log_path = log_file.path().clone();
+                old_log_path = log_file.path.clone();
             }
             Log::re_init(old_log_path);
         }
@@ -158,7 +151,6 @@ macro_rules! log {
 
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -175,12 +167,12 @@ mod tests {
     #[ignore]
     #[test]
     fn test_stat2_pos() {
-        Log::init("./log.log", 100);
-        let v1 = 74;
+        Log::init("./log.log", 10);
+        let v1: usize = 75;
         log!("This value 1 - {}", v1);
-        let v2 = 23;
+        let v2: usize = 24;
         log!("This value 2 - {}", v2);
-        let v3 = 38;
+        let v3: usize = 38;
         log!("This value 3 - {}", v3);
     }
 }
