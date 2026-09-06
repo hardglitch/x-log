@@ -1,0 +1,5 @@
+*
+!.gitignore
+!cargo.toml
+!/src/
+!/src/*.rs
