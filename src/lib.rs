@@ -1,143 +1,108 @@
+#[cfg(test)]
+mod tests;
+
 use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::fmt::Arguments;
+use std::io::{Write, BufWriter};
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub static LOG_FILE: OnceLock<Arc<Mutex<LogFile>>> = OnceLock::new();
 
 pub struct LogFile {
     path: PathBuf,
-    size: u64,
-    file: File,
+    max_size: u64,
+    writer: BufWriter<File>,
 }
+
 impl LogFile {
+	
+    fn rotate(&mut self) -> std::io::Result<()> {
+        self.writer.flush()?;
+
+        if let Some(new_path) = self.get_new_path() {
+			std::fs::rename(&self.path, new_path)?;
+		}
+
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.path)?;
+        
+        self.writer = BufWriter::new(file);
+        Ok(())
+    }
+
 	#[inline]
-	fn write_entry(&mut self, args: Arguments) {
-		let ts = Log::get_timestamp();
-        let _ = self.file.write_all(format!("[{}]: ", ts).as_bytes());
-        let _ = self.file.write_fmt(args);
-        let _ = self.file.write_all(b"\n");
+	fn get_new_path(&self) -> Option<PathBuf> {
+        if let Some(stem) = self.path.file_stem().and_then(|s| s.to_str()) {
+            let ext = self.path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("log");
+				
+            if let Ok(ts) = SystemTime::now().duration_since(UNIX_EPOCH) {
+				let ts = ts.as_nanos();
+				let new_path = self.path.with_file_name(format!("{stem}-{ts}.{ext}"));
+				return Some(new_path)
+			}
+        }
+		None
+	}
+
+	#[inline]
+    fn write_entry(&mut self, args: std::fmt::Arguments) {
+        let ts = Self::get_timestamp();
+        let _ = write!(self.writer, "[{}]: ", ts);
+        let _ = self.writer.write_fmt(args);
+        let _ = self.writer.write_all(b"\n");
+		let _ = self.writer.flush();
+    }
+
+	#[inline]
+    fn get_timestamp() -> String {
+        time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "0000-00-00 00:00:00".to_string())
     }
 }
 
 pub struct Log;
-impl Log {
-    pub fn init(path: &str, file_size: u64) {
-        let log_path = PathBuf::from(&path);
 
-        if let Some(dir) = log_path.parent() {
+impl Log {
+	
+	#[allow(clippy::expect_used)]
+    pub fn init(path: &str, max_size: u64) {
+        let path = PathBuf::from(path);
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
 
         let file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&log_path);
+            .open(&path)
+			// Only once used at the programm start
+            .expect("Failed to open log file");
 
-        match file {
-            Ok(file) => {
-                let log_file = LogFile {
-                    path: log_path,
-                    size: file_size,
-                    file,
-                };
-                LOG_FILE.get_or_init(|| Arc::new(Mutex::new(log_file)));
-            },
-            Err(e) => { eprintln!("{e}") }
-        }
-    }
-
-    fn re_init(old_log_path: PathBuf) {
-        let old_log_p =
-            if let Some(p) = old_log_path.to_str() && !p.is_empty() { p }
-            else { return };
-
-        let p =
-            if let Some(p) = Self::create_new_name(old_log_p) { p }
-            else { return };
-        let new_log_path = PathBuf::from(p);
-
-        if let Some(dir) = PathBuf::from(&old_log_path).parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-
-        let new_file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&new_log_path);
-
-        match new_file {
-            Ok(new_file) =>
-                if let Some(log_file) = LOG_FILE.get().cloned() &&
-                   let Ok(mut old_log_file) = log_file.try_lock()
-                {
-                    let new_log_file = LogFile {
-                        path: new_log_path,
-                        size: old_log_file.size,
-                        file: new_file,
-                    };
-                    *old_log_file = new_log_file;
-                }
-            Err(e) => { eprintln!("{e}"); }
-        }
-    }
-	
-    fn create_new_name(old_name: &str) -> Option<String> {
-        let (base, ext) = old_name.rsplit_once(".")?;
-        let base_wo_time = if let Some(b) = base.rsplit_once("-").map(|x| x.0) { b } else { base };
-
-        let timestamp = {
-            match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(ts) => ts,
-                Err(e) => {
-                    eprintln!("{e}");
-                    return None
-                }
-            }
-                .as_nanos().to_string()
+        let log_file = LogFile {
+            path,
+            max_size,
+            writer: BufWriter::new(file),
         };
 
-        let new_name = format!("{base_wo_time}-{timestamp}.{ext}");
-        Some(new_name)
+        LOG_FILE.get_or_init(|| Arc::new(Mutex::new(log_file)));
     }
-	
+
 	#[inline]
-    fn get_timestamp() -> String {
-        let now = time::OffsetDateTime::now_utc();
-        now.format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "0000-00-00 00:00:00".to_string())
-    }
-	
-	#[inline]
-    pub fn logic(args: Arguments) {
-        let mut meta_len = 0_u64;
-        let mut log_file_size = 0_u64;
-
-        if let Some(m) = LOG_FILE.get() &&
-		   let Ok(log_file) = m.try_lock() &&
-           let Ok(meta) = log_file.file.metadata()
-		{
-            meta_len = meta.len();
-            log_file_size = log_file.size;
-        }
-
-        if meta_len > log_file_size {
-            let mut old_log_path = PathBuf::new();
-
-            if let Some(m) = LOG_FILE.get() &&
-	           let Ok(log_file) = m.try_lock()
-            {
-                old_log_path = log_file.path.clone();
-            }
-            Log::re_init(old_log_path);
-        }
-
-        if let Some(m) = LOG_FILE.get() &&
-		   let Ok(mut log_file) = m.try_lock()
-		{
+    pub fn write(args: std::fmt::Arguments) {
+		if let Some(mutex) = LOG_FILE.get() &&
+           let Ok(mut log_file) = mutex.lock()
+	    {
+			if let Ok(metadata) = log_file.writer.get_ref().metadata() &&
+			   metadata.len() >= log_file.max_size
+			{
+				let _ = log_file.rotate();
+			}
 			log_file.write_entry(args);
         }
     }
@@ -145,34 +110,5 @@ impl Log {
 
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => {{ $crate::Log::logic(format_args!($($arg)*)); }}
-}
-
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[ignore]
-    #[test]
-    fn test_stat1_pos() {
-        Log::init("./log.log", 1024 * 1024);
-        let v1 = 74;
-        log!("This value 1 - {}", v1);
-        let v2 = 23;
-        log!("This value 2 - {}", v2);
-    }
-
-    #[ignore]
-    #[test]
-    fn test_stat2_pos() {
-        Log::init("./log.log", 10);
-        let v1: usize = 75;
-        log!("This value 1 - {}", v1);
-        let v2: usize = 24;
-        log!("This value 2 - {}", v2);
-        let v3: usize = 38;
-        log!("This value 3 - {}", v3);
-    }
+    ($($arg:tt)*) => {{ $crate::Log::write(format_args!($($arg)*)); }}
 }
