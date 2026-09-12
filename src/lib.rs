@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
 mod tests;
 
 use std::fs::{File, OpenOptions};
@@ -6,15 +7,18 @@ use std::io::{Write, BufWriter};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub static LOG_FILE: OnceLock<Arc<Mutex<LogFile>>> = OnceLock::new();
 
+#[derive(Debug)]
 pub struct LogFile {
     path: PathBuf,
     max_size: u64,
     writer: BufWriter<File>,
 }
-
 impl LogFile {
 	
     fn rotate(&mut self) -> std::io::Result<()> {
@@ -106,9 +110,32 @@ impl Log {
 			log_file.write_entry(args);
         }
     }
+	
+	pub fn write_async(args: String) -> WriteLogFuture {
+        WriteLogFuture { args }
+    }
 }
+
+
+pub struct WriteLogFuture {
+    args: String,
+}
+impl Future for WriteLogFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Log::write(format_args!("{}", self.args));
+        Poll::Ready(())
+    }
+}
+
 
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {{ $crate::Log::write(format_args!($($arg)*)); }}
+}
+
+#[macro_export]
+macro_rules! async_log {
+    ($($arg:tt)*) => {{ $crate::Log::write_async(format!($($arg)*)).await; }};
 }

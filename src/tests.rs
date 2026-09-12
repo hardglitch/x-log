@@ -1,15 +1,14 @@
 use super::*;
-use std::fs;
 
 fn cleanup(path: &str) {
-	let _ = fs::remove_file(path);
+	let _ = std::fs::remove_file(path);
 	let start = format!("{}-", path.split('.').next().unwrap());
-	for entry in fs::read_dir(".").unwrap() {
+	for entry in std::fs::read_dir(".").unwrap() {
 		let path = entry.unwrap().path();
 		if path.extension().and_then(|s| s.to_str()) == Some("log") &&
            path.file_name().unwrap().to_str().unwrap().starts_with(&start)
 	    {
-			let _ = fs::remove_file(path);
+			let _ = std::fs::remove_file(path);
 		}
 	}
 }
@@ -20,7 +19,7 @@ fn read_main_log(path: &str) -> String {
 
 fn read_other_logs(path: &str) -> Vec<PathBuf> {
 	let start = format!("{}-", path.split('.').next().unwrap());
-	fs::read_dir(".")
+	std::fs::read_dir(".")
 		.unwrap()
 		.filter_map(|e| e.ok())
 		.map(|e| e.path())
@@ -28,12 +27,37 @@ fn read_other_logs(path: &str) -> Vec<PathBuf> {
 		.collect()
 }
 
-#[test]
-fn test_stat1_pos() {
+fn re_init(path: &str, max_size: u64) {
+	let path = PathBuf::from(path);
+	let file = OpenOptions::new()
+		.append(true)
+		.create(true)
+		.open(&path)
+		.unwrap();
+
+	let log_file = LogFile {
+		path,
+		max_size,
+		writer: BufWriter::new(file),
+	};
+
+	let mut f = LOG_FILE.get().unwrap().lock().unwrap();
+	*f = log_file
+}
+
+#[tokio::test]
+async fn test_log_all() {
+	Log::init("test1.log", 0);
+	
+	test_log();
+	test_async_log().await;
+}
+
+
+fn test_log() {
 	let log_path = "test1.log";
 	cleanup(log_path);
-
-	Log::init(log_path, 90); 
+	re_init(log_path, 90);
 
 	log!("V1: {}", 75);
 	log!("V1: {}", 75);
@@ -55,11 +79,34 @@ fn test_stat1_pos() {
 
     assert_eq!(other_logs.len() + 1, 3);
 
-	let old_log = fs::read_to_string(&other_logs[0]).unwrap();
+	let old_log = std::fs::read_to_string(&other_logs[0]).unwrap();
 	assert!(old_log.contains("V1: 75"));
 
-	let old_log = fs::read_to_string(&other_logs[1]).unwrap();
+	let old_log = std::fs::read_to_string(&other_logs[1]).unwrap();
 	assert!(old_log.contains("V2: 24"));
 	
 	cleanup(log_path);
+}
+
+async fn test_async_log() {
+    let log_path = "test2.log";
+    cleanup(log_path);
+	re_init(log_path, 50);
+
+    async_log!("Init: {}", 1);
+    
+    let mut handles = vec![];
+    for i in 2..=7 {
+        handles.push(tokio::spawn(async move { async_log!("Task: {}", i); }));
+    }
+    for h in handles { h.await.unwrap(); }
+
+    let main_content = read_main_log(log_path);
+    let mut total_lines = main_content.lines().count();
+	total_lines += read_other_logs(log_path).iter()
+		.map(|p| { std::fs::read_to_string(p).unwrap().lines().count() })
+		.sum::<usize>();
+
+    assert!(total_lines >= 7);
+    cleanup(log_path);
 }
