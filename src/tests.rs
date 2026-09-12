@@ -30,21 +30,22 @@ fn read_other_logs(path: &str) -> Vec<PathBuf> {
 }
 
 fn re_init(path: &str, max_size: u64) {
-	let path = PathBuf::from(path);
 	let backend = LogBackend::new(path, max_size);
-	let cmd = backend::LogCommand::Update(backend);
 	let tx = LOG_SENDER.get().unwrap();
+
+	let cmd = backend::LogCommand::Flush;
+	let _ = tx.send(cmd);
+	let cmd = backend::LogCommand::Update(backend);
 	let _ = tx.send(cmd);
 }
 
 #[tokio::test]
 async fn test_log_all() {
-	Log::init("test1.log", 0);
-	
+	let _log = Log::init("test1.log", 0);
+
 	test_log();
 	test_async_log().await;
 }
-
 
 fn test_log() {
 	let log_path = "test1.log";
@@ -70,19 +71,22 @@ fn test_log() {
 	std::thread::sleep(std::time::Duration::from_millis(50));
 
 	let main_log = read_main_log(log_path);
-	assert!(main_log.contains("V3: 38"));
-	
+	assert!(main_log.is_empty());
+
 	let other_logs = read_other_logs(log_path);
 	assert!(!other_logs.is_empty());
 
-    assert_eq!(other_logs.len() + 1, 3);
+    assert_eq!(other_logs.len() + 1, 4);
 
 	let old_log = std::fs::read_to_string(&other_logs[0]).unwrap();
 	assert!(old_log.contains("V1: 75"));
 
 	let old_log = std::fs::read_to_string(&other_logs[1]).unwrap();
 	assert!(old_log.contains("V2: 24"));
-	
+
+	let old_log = std::fs::read_to_string(&other_logs[2]).unwrap();
+	assert!(old_log.contains("V3: 38"));
+
 	cleanup(log_path);
 }
 
@@ -105,8 +109,8 @@ async fn test_async_log() {
 	}
 	tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let main_content = read_main_log(log_path);
-    let mut total_lines = main_content.lines().count();
+    let main_log = read_main_log(log_path);
+    let mut total_lines = main_log.lines().count();
 	total_lines += read_other_logs(log_path).iter()
 		.map(|p| { std::fs::read_to_string(p).unwrap().lines().count() })
 		.sum::<usize>();

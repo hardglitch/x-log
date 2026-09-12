@@ -1,14 +1,16 @@
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
 mod tests;
-mod backend;
+pub mod backend;
 
+#[derive(Default)]
 pub struct Log;
 
 impl Log {
-
-    pub fn init(path: &str, max_size: u64) {
-        backend::LogBackend::init(path, max_size);
+    pub fn init(path: &str, max_size: u64) -> Self {
+        let backend = backend::LogBackend::new(path, max_size);
+        backend.init();
+        Self
     }
 
     #[inline]
@@ -28,6 +30,17 @@ impl Log {
             let cmd = backend::LogCommand::Deferred(Box::new(f));
             let _ = tx.send(cmd);
         }
+    }
+
+    #[inline]
+    pub fn shutdown() {
+        backend::LogBackend::shutdown();
+    }
+}
+
+impl Drop for Log {
+    fn drop(&mut self) {
+        backend::LogBackend::shutdown();
     }
 }
 

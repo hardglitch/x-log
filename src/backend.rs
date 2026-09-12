@@ -2,10 +2,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) static LOG_SENDER: OnceLock<SyncSender<LogCommand>> = OnceLock::new();
+static LOG_RECEIVER: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 const BUFFER_SIZE: usize = 64 * 1024; // 64 kb
 const CHANNEL_SIZE: usize = 1024;
 
@@ -16,17 +18,21 @@ pub(crate) enum LogCommand {
 
     Update(LogBackend),
     Flush,
+    Terminate,
 }
 
 #[derive(Debug)]
-pub(crate) struct LogBackend {
+pub struct LogBackend {
     pub(crate) path: PathBuf,
     pub(crate) max_size: u64,
     pub(crate) writer: BufWriter<File>,
+    buffer_size: usize,
+    channel_size: usize,
 }
 impl LogBackend {
     #[allow(clippy::expect_used)]
-    pub(crate) fn new(path: PathBuf, max_size: u64) -> Self {
+    pub(crate) fn new<T: AsRef<str>>(path: T, max_size: u64) -> Self {
+        let path = PathBuf::from(path.as_ref());
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -36,33 +42,35 @@ impl LogBackend {
             path,
             max_size,
             writer: BufWriter::with_capacity(BUFFER_SIZE, file),
+            buffer_size: BUFFER_SIZE,
+            channel_size: CHANNEL_SIZE,
         }
     }
 
     #[allow(clippy::expect_used)]
-    pub(crate) fn init(path: &str, max_size: u64) {
-        let (tx, rx) = sync_channel::<LogCommand>(CHANNEL_SIZE);
+    pub(crate) fn init(mut self) {
+        let (tx, rx) = sync_channel::<LogCommand>(self.channel_size);
 
-        let path = PathBuf::from(path);
-        std::thread::spawn(move || {
-            if let Some(dir) = path.parent() {
+        let handle = std::thread::spawn(move || {
+            if let Some(dir) = self.path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
 
-            let mut backend = Self::new(path, max_size);
             loop {
                 if let Ok(cmd) = rx.recv() {
                     match cmd {
-                        LogCommand::Message(s) => backend.write(s),
-                        LogCommand::Deferred(f) => backend.write(f()),
-                        LogCommand::Update(backend_) => backend = backend_,
-                        LogCommand::Flush => backend.flush(),
+                        LogCommand::Message(s) => self.write(s),
+                        LogCommand::Deferred(f) => self.write(f()),
+                        LogCommand::Update(backend_) => self = backend_,
+                        LogCommand::Flush => self.flush(),
+                        LogCommand::Terminate => { self.flush(); break }
                     }
                 }
             }
         });
 
-        LOG_SENDER.set(tx).expect("Log initialized more than once");
+        LOG_SENDER.set(tx).expect("Log sender initialized more than once");
+        LOG_RECEIVER.set(Mutex::new(Some(handle))).expect("Log receiver initialized more than once");
     }
 
     fn rotate(&mut self) -> std::io::Result<()> {
@@ -75,7 +83,7 @@ impl LogBackend {
             .create(true)
             .open(&self.path)?;
 
-        self.writer = BufWriter::with_capacity(BUFFER_SIZE, file);
+        self.writer = BufWriter::with_capacity(self.buffer_size, file);
         Ok(())
     }
 
@@ -92,8 +100,8 @@ impl LogBackend {
     #[inline]
     pub(crate) fn write(&mut self, msg: String) {
         let ts = Self::get_timestamp();
-        self.check_rotate();
         let _ = writeln!(self.writer, "[{}]: {}", ts, msg);
+        self.check_rotate();
     }
     #[inline]
     fn get_timestamp() -> String {
@@ -103,13 +111,11 @@ impl LogBackend {
     }
     #[inline]
     fn check_rotate(&mut self) {
-        // Flush
         if self.writer.buffer().len() >= self.max_size as usize ||
            self.writer.buffer().len() >= self.writer.capacity()
         {
             self.flush();
 
-            // Rotate
             if let Ok(metadata) = self.writer.get_ref().metadata() &&
                metadata.len() >= self.max_size
             {
@@ -122,9 +128,66 @@ impl LogBackend {
     fn flush(&mut self) {
         let _ = self.writer.flush();
     }
+
+    #[inline]
+    pub(crate) fn shutdown() {
+        if let Some(tx) = LOG_SENDER.get() {
+            let _ = tx.send(LogCommand::Terminate);
+        }
+        if let Some(mutex) = LOG_RECEIVER.get() &&
+           let Ok(mut guard) = mutex.lock() &&
+           let Some(handle) = guard.take()
+        {
+            let _ = handle.join();
+        }
+    }
 }
 impl Drop for LogBackend {
     fn drop(&mut self) {
         self.flush();
+    }
+}
+
+#[derive(Debug)]
+pub struct LogBackendBuilder {
+    pub(crate) path: PathBuf,
+    pub(crate) max_size: u64,
+    buffer_size: Option<usize>,
+    channel_size: Option<usize>,
+}
+impl LogBackendBuilder {
+    pub fn path<T: AsRef<str>>(mut self, path: T) -> Self {
+        self.path = PathBuf::from(path.as_ref());
+        self
+    }
+    pub fn max_size(mut self, size: u64) -> Self {
+        self.max_size = size;
+        self
+    }
+    pub fn buffer_size(mut self, size: usize) -> Self {
+        self.buffer_size = Some(size);
+        self
+    }
+    pub fn channel_size(mut self, size: usize) -> Self {
+        self.channel_size = Some(size);
+        self
+    }
+    #[allow(clippy::expect_used)]
+    pub fn build(self) -> LogBackend {
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.path)
+            .expect("Failed to init log backend");
+
+        let buf_size = self.buffer_size.unwrap_or(BUFFER_SIZE);
+
+        LogBackend {
+            path: self.path,
+            max_size: self.max_size,
+            writer: BufWriter::with_capacity(buf_size, file),
+            buffer_size: buf_size,
+            channel_size: self.channel_size.unwrap_or(CHANNEL_SIZE),
+        }
     }
 }
