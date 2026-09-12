@@ -1,4 +1,6 @@
 use super::*;
+use crate::backend::{LogBackend, LOG_SENDER};
+use std::path::PathBuf;
 
 fn cleanup(path: &str) {
 	let _ = std::fs::remove_file(path);
@@ -29,20 +31,10 @@ fn read_other_logs(path: &str) -> Vec<PathBuf> {
 
 fn re_init(path: &str, max_size: u64) {
 	let path = PathBuf::from(path);
-	let file = OpenOptions::new()
-		.append(true)
-		.create(true)
-		.open(&path)
-		.unwrap();
-
-	let log_file = LogFile {
-		path,
-		max_size,
-		writer: BufWriter::new(file),
-	};
-
-	let mut f = LOG_FILE.get().unwrap().lock().unwrap();
-	*f = log_file
+	let backend = LogBackend::new(path, max_size);
+	let cmd = backend::LogCommand::Update(backend);
+	let tx = LOG_SENDER.get().unwrap();
+	let _ = tx.send(cmd);
 }
 
 #[tokio::test]
@@ -57,7 +49,7 @@ async fn test_log_all() {
 fn test_log() {
 	let log_path = "test1.log";
 	cleanup(log_path);
-	re_init(log_path, 90);
+	re_init(log_path, 100);
 
 	log!("V1: {}", 75);
 	log!("V1: {}", 75);
@@ -70,6 +62,12 @@ fn test_log() {
 	log!("V3: {}", 38);
 	log!("V3: {}", 38);
 	log!("V3: {}", 38);
+
+	if let Some(tx) = LOG_SENDER.get() {
+		let cmd = backend::LogCommand::Flush;
+		let _ = tx.send(cmd);
+	}
+	std::thread::sleep(std::time::Duration::from_millis(50));
 
 	let main_log = read_main_log(log_path);
 	assert!(main_log.contains("V3: 38"));
@@ -100,6 +98,12 @@ async fn test_async_log() {
         handles.push(tokio::spawn(async move { async_log!("Task: {}", i); }));
     }
     for h in handles { h.await.unwrap(); }
+
+	if let Some(tx) = LOG_SENDER.get() {
+		let cmd = backend::LogCommand::Flush;
+		let _ = tx.send(cmd);
+	}
+	tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let main_content = read_main_log(log_path);
     let mut total_lines = main_content.lines().count();
