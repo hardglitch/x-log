@@ -1,57 +1,106 @@
-# Log
-A lightweight, thread-safe logging library for Rust that implements automatic file rotation based on file size. When a log file reaches the specified threshold, it is renamed with a high-precision timestamp and a new log file is created.
+# X-Log
+
+A lightweight, asynchronous, and thread-safe logging library for Rust. It offloads string formatting and disk I/O to a dedicated background thread to ensure that logging doesn't block your application's main execution path.
 
 ## Features
-*   **Automatic File Rotation**: Automatically rolls over to a new file when the current one exceeds your specified size limit.
-*   **Timestamped Backups**: Renames old logs using Unix nanosecond timestamps to ensure unique filenames and prevent overwriting.
-*   **Thread-Safe**: Designed with `Arc`, `Mutex`, and `OnceLock` for safe concurrent logging from multiple threads.
-*   **Non-blocking Rotation Check**: Uses non-blocking lock attempts (`try_lock`) during the rotation check to minimize performance impact on your application's main logic.
 
+*   **Asynchronous Logging**: Uses a bounded MPSC channel to move work to a background thread.
+*   **Lazy Formatting**: Uses closures to defer string formatting until the background thread is ready, minimizing latency in the caller thread.
+*   **Log Rotation**: Automatically rotates log files when they reach a specified size limit.
+*   **Thread Safe**: Designed for use across multiple threads via a global static sender.
+*   **Buffered I/O**: Uses `BufWriter` to minimize system calls and improve performance.
 
-## Quick Start
-Call `Log::init` once at the start of your application. You need to provide a file path and the maximum size (in bytes) allowed before rotation occurs.
+## Reliability & Coverage
+- **Memory Safety**: Verified with `cargo miri` (100% clean).
+- **Robustness**: Fuzzed with [`cargo fuzz`](https://github.com/rust-fuzz/cargo-fuzz) (100% clean).
+
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+x-log = "0.7.2"
+# or x-log = { git = "https://github.com/hardglitch/log" }
+```
+
+## Basic usage
+
+To use the logger, initialize it once at the start of your application.
 
 ```rust
-use log::{Log, log};
+use x_log::{Log, log};
 
 fn main() {
-    // Initialize logging to "./logs/app.log" 
-    // Limit set to 1MB (1024 * 1024 bytes)
-    Log::init("./logs/app.log", 1024 * 1024);
+    let _guard = Log::init(); // log.log , max_size = 10 MB
 
-    let user = "Alice";
-    let status = "Success";
+    log!("Application started!");
+    log!("The answer is {}", 42);
 
-    // Use the log! macro to write messages
-    log!("User: {}, Status: {}", user, status);
+    for i in 0..5 {
+        log!("Processing item number: {}", i);
+    }
+
+    // Ensure all logs are flushed to disk.
+    // The logger will automatically shutdown when `_guard` goes out of scope (RAII),
+    // or you can call it manually: Log::shutdown();
+}
+```
+*logs/app.log*
+```
+[2026-09-13T13:35:56.6214121Z]: Application started!
+[2026-09-13T13:35:56.6214709Z]: The answer is 42
+[2026-09-13T13:35:56.6214898Z]: Processing item number: 0
+[2026-09-13T13:35:56.6214953Z]: Processing item number: 1
+[2026-09-13T13:35:56.6214995Z]: Processing item number: 2
+[2026-09-13T13:35:56.6215062Z]: Processing item number: 3
+[2026-09-13T13:35:56.6215108Z]: Processing item number: 4
+```
+
+## Advanced usage: Customizing via Builder
+
+If you need more control use the `LogBackendBuilder`:
+
+```rust
+use x_log::backend::{LogBackendBuilder};
+use x_log::{Log, log};
+
+fn main() {
+    let backend = LogBackendBuilder::new()
+        .path("logs/custom.log")
+        .max_size(5 * 1024 * 1024)  // 5MB
+        .buffer_size(32 * 1024)     // 32KB buffer
+        .channel_size(500)          // Queue up to 500 messages
+        .build();
+
+    let _guard = Log::init_with(backend);
+	
+	log!("Application started!");
+    log!("The answer is {}", 42);
+
+    for i in 0..5 {
+        log!("Processing item number: {}", i);
+    }
+
+    // Ensure all logs are flushed to disk.
+    // The logger will automatically shut down when `_guard` goes out of scope (RAII),
+    // or you can call it manually: Log::shutdown();
 }
 ```
 
-## How it Works (Rotation Logic)
+## Configuration Details
 
-**1.** Size Check: Every time the log! macro is called, the library checks if the current file size exceeds the limit defined during initialization.
+| Feature | Description | Default |
+| :--- | :--- | :--- |
+| **Path** | Path to log file | log.log |
+| **Max Size** | When a file reaches `max_size`, it is renamed and a new file is created. | 10 Mb |
+| **Buffer Size** | Internal buffer size for `BufWriter` (bytes). | 64 KB |
+| **Channel Size** | Number of messages that can be queued before the caller blocks. | 1024 |
 
-**2.** Renaming: If the threshold is reached, the current file (e.g., app.log) is renamed to a timestamped version (e.g., app-1715432100000000000.log).
+## Performance Tips
 
-**3.** New File Creation: A fresh log file is created immediately, and all subsequent logs are written there.
+1.  **Avoid Heavy Logic in Macros**: The `log!` macro uses a closure. While this prevents formatting unless the logger is active, try to keep the logic inside the `format!` call simple.
+2.  **Shutdown Gracefully**: Always ensure the `Log` instance is dropped or that `Log::shutdown()` is called before your program exits to ensure all buffered messages are flushed to disk.
 
-## API Reference
-
-`Log::init(path: &str, file_size: u64)`
-
-Initializes the global logger instance.
-
-* **path**: The relative or absolute path to the log file.
-* **file_size**: Max size in bytes before rotation occurs.
-* **Note**: If init is called multiple times, only the first call will configure the logger (due to OnceLock).
-
-**Macro:** `log!(...)`
-The primary way to write logs. It expands to a call to the internal logic that handles timestamping and file writing.
-
----
-
-### 💡 Implementation Tips for Users
-
-* **Performance**: The current implementation uses `try_lock`. If multiple threads attempt to rotate the file at the exact same microsecond, some log entries might be skipped or delayed during the rotation window to prevent blocking your main application logic.
-
-* **Directory Creation**: The library automatically creates parent directories if they do not exist when initializing.
+## License
+  * This project is licensed under the [MIT license](LICENSE).
