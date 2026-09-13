@@ -75,8 +75,8 @@ impl LogBackend {
             }
         });
 
-        LOG_SENDER.set(tx).expect("Log sender initialized more than once");
-        LOG_RECEIVER.set(Mutex::new(Some(handle))).expect("Log receiver initialized more than once");
+        LOG_SENDER.get_or_init(|| tx);
+        LOG_RECEIVER.get_or_init(|| Mutex::new(Some(handle)));
     }
 
     fn rotate(&mut self) -> std::io::Result<()> {
