@@ -13,6 +13,11 @@ impl Log {
         Self
     }
 
+    pub fn init_with(backend: backend::LogBackend) -> Self {
+        backend.init();
+        Self
+    }
+
     #[inline]
     pub fn send<F>(f: F)
     where

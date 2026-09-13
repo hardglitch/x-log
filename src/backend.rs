@@ -26,11 +26,18 @@ pub struct LogBackend {
     pub(crate) writer: BufWriter<File>,
     buffer_size: usize,
     channel_size: usize,
+    file_counter: usize,
+    file_size: u64,
 }
 impl LogBackend {
     #[allow(clippy::expect_used)]
     pub(crate) fn new<T: AsRef<str>>(path: T, max_size: u64) -> Self {
         let path = PathBuf::from(path.as_ref());
+
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -42,6 +49,8 @@ impl LogBackend {
             writer: BufWriter::with_capacity(BUFFER_SIZE, file),
             buffer_size: BUFFER_SIZE,
             channel_size: CHANNEL_SIZE,
+            file_counter: 0,
+            file_size: 0,
         }
     }
 
@@ -49,11 +58,11 @@ impl LogBackend {
     pub(crate) fn init(mut self) {
         let (tx, rx) = sync_channel::<LogCommand>(self.channel_size);
 
-        let handle = std::thread::spawn(move || {
-            if let Some(dir) = self.path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
 
+        let handle = std::thread::spawn(move || {
             loop {
                 if let Ok(cmd) = rx.recv() {
                     match cmd {
@@ -71,6 +80,8 @@ impl LogBackend {
     }
 
     fn rotate(&mut self) -> std::io::Result<()> {
+        self.writer.flush()?;
+
         if let Some(new_path) = self.get_new_path() {
             std::fs::rename(&self.path, new_path)?;
         }
@@ -81,6 +92,9 @@ impl LogBackend {
             .open(&self.path)?;
 
         self.writer = BufWriter::with_capacity(self.buffer_size, file);
+        self.file_counter = self.file_counter.wrapping_add(1);
+        self.file_size = 0;
+
         Ok(())
     }
 
@@ -89,16 +103,31 @@ impl LogBackend {
         let stem = self.path.file_stem()?.to_str()?;
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("log");
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_nanos();
-        let hash = (ts % 1000) as u32;
-        let new_path = self.path.with_file_name(format!("{stem}-{ts}-{hash}.{ext}"));
+        let cnt = self.file_counter;
+        let new_path = self.path.with_file_name(format!("{stem}-{ts}-{cnt}.{ext}"));
         Some(new_path)
     }
 
     #[inline]
     pub(crate) fn write(&mut self, msg: String) {
         let ts = Self::get_timestamp();
+        let msg_len = ts.len() + msg.len() + 3; // 3 for ": " and "\n"
+
+        // 1. Check 1
+        if self.file_size + msg_len as u64 >= self.max_size {
+            self.flush();
+            let _ = self.rotate();
+        }
+
+        // 2. Write to buffer
         let _ = writeln!(self.writer, "[{}]: {}", ts, msg);
-        self.check_rotate();
+
+        self.file_size = self.file_size.saturating_add(msg_len as u64);
+
+        // 3. Check 2
+        if self.writer.buffer().len() >= self.writer.capacity() {
+            self.flush();
+        }
     }
     #[inline]
     fn get_timestamp() -> String {
@@ -106,24 +135,15 @@ impl LogBackend {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "0000-00-00 00:00:00".to_string())
     }
-    #[inline]
-    fn check_rotate(&mut self) {
-        if self.writer.buffer().len() >= self.max_size as usize ||
-           self.writer.buffer().len() >= self.writer.capacity()
-        {
-            self.flush();
-
-            if let Ok(metadata) = self.writer.get_ref().metadata() &&
-               metadata.len() >= self.max_size
-            {
-                let _ = self.rotate();
-            }
-        }
-    }
 
     #[inline]
     fn flush(&mut self) {
-        let _ = self.writer.flush();
+        if !self.writer.buffer().is_empty() {
+            let _ = self.writer.flush();
+            if let Ok(metadata) = self.writer.get_ref().metadata() {
+                self.file_size = metadata.len();
+            }
+        }
     }
 
     #[inline]
@@ -145,7 +165,7 @@ impl Drop for LogBackend {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LogBackendBuilder {
     pub(crate) path: PathBuf,
     pub(crate) max_size: u64,
@@ -153,6 +173,9 @@ pub struct LogBackendBuilder {
     channel_size: Option<usize>,
 }
 impl LogBackendBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn path<T: AsRef<str>>(mut self, path: T) -> Self {
         self.path = PathBuf::from(path.as_ref());
         self
@@ -171,6 +194,10 @@ impl LogBackendBuilder {
     }
     #[allow(clippy::expect_used)]
     pub fn build(self) -> LogBackend {
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -185,6 +212,8 @@ impl LogBackendBuilder {
             writer: BufWriter::with_capacity(buf_size, file),
             buffer_size: buf_size,
             channel_size: self.channel_size.unwrap_or(CHANNEL_SIZE),
+            file_counter: 0,
+            file_size: 0,
         }
     }
 }
