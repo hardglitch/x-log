@@ -1,7 +1,12 @@
 *
-!.gitignore
-!cargo.toml
 !/src/
 !/src/*.rs
+!/examples/
+!/examples/*.rs
+!/fuzz/
+!/fuzz/fuzz_targets/
+!/fuzz/fuzz_targets/*.rs
 !LICENSE
 !README.md
+!.gitignore
+!Cargo.toml
