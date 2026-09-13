@@ -32,7 +32,7 @@ pub struct LogBackend {
 impl LogBackend {
     #[allow(clippy::expect_used)]
     pub(crate) fn new() -> Self {
-        let path = PathBuf::from(PathBuf::from("log.log"));
+        let path = PathBuf::from("log.log");
 
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -111,10 +111,10 @@ impl LogBackend {
     #[inline]
     pub(crate) fn write(&mut self, msg: String) {
         let ts = Self::get_timestamp();
-        let msg_len = ts.len() + msg.len() + 3; // 3 for ": " and "\n"
+        let msg_len = ts.len().saturating_add(msg.len()).saturating_add(3); // 3 for ": " and "\n"
 
         // 1. Check 1
-        if self.file_size + msg_len as u64 >= self.max_size {
+        if self.file_size.saturating_add(msg_len as u64) >= self.max_size {
             self.flush();
             let _ = self.rotate();
         }
@@ -167,8 +167,8 @@ impl Drop for LogBackend {
 
 #[derive(Debug, Default)]
 pub struct LogBackendBuilder {
-    pub(crate) path: Option<PathBuf>,
-    pub(crate) max_size: Option<u64>,
+    path: Option<PathBuf>,
+    max_size: Option<u64>,
     buffer_size: Option<usize>,
     channel_size: Option<usize>,
 }
