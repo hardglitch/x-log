@@ -31,8 +31,8 @@ pub struct LogBackend {
 }
 impl LogBackend {
     #[allow(clippy::expect_used)]
-    pub(crate) fn new<T: AsRef<str>>(path: T, max_size: u64) -> Self {
-        let path = PathBuf::from(path.as_ref());
+    pub(crate) fn new() -> Self {
+        let path = PathBuf::from(PathBuf::from("log.log"));
 
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -45,7 +45,7 @@ impl LogBackend {
 
         Self {
             path,
-            max_size,
+            max_size: 10 * 1024 * 1024,
             writer: BufWriter::with_capacity(BUFFER_SIZE, file),
             buffer_size: BUFFER_SIZE,
             channel_size: CHANNEL_SIZE,
@@ -167,8 +167,8 @@ impl Drop for LogBackend {
 
 #[derive(Debug, Default)]
 pub struct LogBackendBuilder {
-    pub(crate) path: PathBuf,
-    pub(crate) max_size: u64,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) max_size: Option<u64>,
     buffer_size: Option<usize>,
     channel_size: Option<usize>,
 }
@@ -177,11 +177,11 @@ impl LogBackendBuilder {
         Self::default()
     }
     pub fn path<T: AsRef<str>>(mut self, path: T) -> Self {
-        self.path = PathBuf::from(path.as_ref());
+        self.path = Some(PathBuf::from(path.as_ref()));
         self
     }
     pub fn max_size(mut self, size: u64) -> Self {
-        self.max_size = size;
+        self.max_size = Some(size);
         self
     }
     pub fn buffer_size(mut self, size: usize) -> Self {
@@ -194,21 +194,22 @@ impl LogBackendBuilder {
     }
     #[allow(clippy::expect_used)]
     pub fn build(self) -> LogBackend {
-        if let Some(dir) = self.path.parent() {
+        let path = self.path.unwrap_or(PathBuf::from("log.log"));
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
 
         let file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&self.path)
+            .open(&path)
             .expect("Failed to init log backend");
 
         let buf_size = self.buffer_size.unwrap_or(BUFFER_SIZE);
 
         LogBackend {
-            path: self.path,
-            max_size: self.max_size,
+            path,
+            max_size: self.max_size.unwrap_or(10 * 1024 * 1024),
             writer: BufWriter::with_capacity(buf_size, file),
             buffer_size: buf_size,
             channel_size: self.channel_size.unwrap_or(CHANNEL_SIZE),

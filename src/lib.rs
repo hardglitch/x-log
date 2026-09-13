@@ -7,8 +7,8 @@ pub mod backend;
 pub struct Log;
 
 impl Log {
-    pub fn init(path: &str, max_size: u64) -> Self {
-        let backend = backend::LogBackend::new(path, max_size);
+    pub fn init() -> Self {
+        let backend = backend::LogBackend::new();
         backend.init();
         Self
     }

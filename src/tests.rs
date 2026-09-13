@@ -1,6 +1,6 @@
 use std::io::BufRead;
 use super::*;
-use crate::backend::{LogBackend, LogBackendBuilder, LOG_SENDER};
+use crate::backend::{LogBackendBuilder, LOG_SENDER};
 use std::path::PathBuf;
 
 fn cleanup(path: &str) {
@@ -31,7 +31,11 @@ fn read_other_logs(path: &str) -> Vec<PathBuf> {
 }
 
 fn re_init(path: &str, max_size: u64) {
-	let backend = LogBackend::new(path, max_size);
+	let backend = LogBackendBuilder::new()
+		.path(path)
+		.max_size(max_size)
+		.build();
+
 	let tx = LOG_SENDER.get().unwrap();
 
 	let cmd = backend::LogCommand::Flush;
