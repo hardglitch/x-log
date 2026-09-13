@@ -95,11 +95,11 @@ async fn test_async_log() {
     cleanup(log_path);
 	re_init(log_path, 50);
 
-    async_log!("Init: {}", 1);
+    log!("Init: {}", 1);
     
     let mut handles = vec![];
     for i in 2..=7 {
-        handles.push(tokio::spawn(async move { async_log!("Task: {}", i); }));
+        handles.push(tokio::spawn(async move { log!("Task: {}", i); }));
     }
     for h in handles { h.await.unwrap(); }
 

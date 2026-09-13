@@ -14,20 +14,12 @@ impl Log {
     }
 
     #[inline]
-    pub fn send(args: std::fmt::Arguments) {
-        if let Some(tx) = backend::LOG_SENDER.get() {
-            let cmd = backend::LogCommand::Message(format!("{}", args));
-            let _ = tx.send(cmd);
-        }
-    }
-
-    #[inline]
-    pub fn send_async<F>(f: F)
+    pub fn send<F>(f: F)
     where
         F: FnOnce() -> String + Send + 'static
     {
         if let Some(tx) = backend::LOG_SENDER.get() {
-            let cmd = backend::LogCommand::Deferred(Box::new(f));
+            let cmd = backend::LogCommand::Message(Box::new(f));
             let _ = tx.send(cmd);
         }
     }
@@ -46,10 +38,5 @@ impl Drop for Log {
 
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => {{ $crate::Log::send(format_args!($($arg)*)); }}
-}
-
-#[macro_export]
-macro_rules! async_log {
-    ($($arg:tt)*) => {{ $crate::Log::send_async(move || format!($($arg)*)); }};
+    ($($arg:tt)*) => {{ $crate::Log::send(move || format!($($arg)*)); }};
 }
