@@ -55,6 +55,6 @@ macro_rules! log {
 }
 
 #[macro_export]
-macro_rules! log_owned {
+macro_rules! log_eager {
     ($($arg:tt)*) => {{ $crate::Log::send_owned(format!($($arg)*)); }};
 }
