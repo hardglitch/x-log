@@ -1,5 +1,5 @@
-use log::backend::{LogBackendBuilder};
-use log::{Log, log};
+use x_log::backend::{LogBackendBuilder};
+use x_log::{Log, log};
 
 fn main() {
     let backend = LogBackendBuilder::new()

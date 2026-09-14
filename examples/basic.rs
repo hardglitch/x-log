@@ -1,4 +1,4 @@
-use log::{Log, log};
+use x_log::{Log, log};
 
 fn main() {
     let _guard = Log::init(); // log.log , max_size = 10 Mb
