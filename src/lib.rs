@@ -30,6 +30,14 @@ impl Log {
     }
 
     #[inline]
+    pub fn send_owned(msg: String) {
+        if let Some(tx) = backend::LOG_SENDER.get() {
+            let cmd = backend::LogCommand::MessageOwned(msg);
+            let _ = tx.send(cmd);
+        }
+    }
+
+    #[inline]
     pub fn shutdown() {
         backend::LogBackend::shutdown();
     }
@@ -44,4 +52,9 @@ impl Drop for Log {
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {{ $crate::Log::send(move || format!($($arg)*)); }};
+}
+
+#[macro_export]
+macro_rules! log_owned {
+    ($($arg:tt)*) => {{ $crate::Log::send_owned(format!($($arg)*)); }};
 }

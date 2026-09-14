@@ -14,6 +14,7 @@ const CHANNEL_SIZE: usize = 1024;
 #[allow(dead_code)]
 pub(crate) enum LogCommand {
     Message(Box<dyn FnOnce() -> String + Send>),
+    MessageOwned(String),
     Update(LogBackend),
     Flush,
     Terminate,
@@ -67,6 +68,7 @@ impl LogBackend {
                 if let Ok(cmd) = rx.recv() {
                     match cmd {
                         LogCommand::Message(f) => self.write(f()),
+                        LogCommand::MessageOwned(msg) => self.write(msg),
                         LogCommand::Update(backend_) => self = backend_,
                         LogCommand::Flush => self.flush(),
                         LogCommand::Terminate => { self.flush(); break }
