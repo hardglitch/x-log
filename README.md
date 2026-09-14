@@ -21,7 +21,7 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 x-log = "0.7.3"
-# or x-log = { git = "https://github.com/hardglitch/log" }
+# or x-log = { git = "https://github.com/hardglitch/x-log" }
 ```
 
 ## Basic usage
