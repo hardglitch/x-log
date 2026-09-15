@@ -3,13 +3,14 @@ use x_log::{Log, log};
 
 fn main() {
     let backend = LogBackendBuilder::new()
-        .path("logs/custom.log")
+        .path("logs/advanced.log")
         .max_size(5 * 1024 * 1024)  // 5MB
         .buffer_size(32 * 1024)     // 32KB buffer
         .channel_size(500)          // Queue up to 500 messages
         .build();
 
-    let _guard = Log::init_with(backend);
+    let _guard = Log::init_with_backend(backend);
+    // or use log_init_with_backend!(backend)
 	
 	log!("Application started!");
     log!("The answer is {}", 42);

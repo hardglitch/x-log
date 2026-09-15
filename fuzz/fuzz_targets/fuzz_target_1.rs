@@ -22,7 +22,7 @@ fuzz_target!(|input: FuzzInput| {
             .channel_size(500)
             .build();
 
-        Log::init_with(backend);
+        Log::init_with_backend(backend);
     });
 	
 	let msg = String::from_utf8(input.text).unwrap_or_default();
