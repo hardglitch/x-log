@@ -11,6 +11,7 @@ fn main() {
 
     let _guard = Log::init_with_backend(backend);
     // or use log_init_with_backend!(backend)
+    // always place to main.rs
 	
 	log!("Application started!");
     log!("The answer is {}", 42);

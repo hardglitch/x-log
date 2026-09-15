@@ -29,10 +29,10 @@ x-log = "0.7.3"
 To use the logger, initialize it once at the start of your application.
 
 ```rust
-use x_log::{Log, log};
+use x_log::{log, log_init};
 
 fn main() {
-    let _guard = Log::init(); // log.log , max_size = 10 MB
+    log_init!(); // always place to main.rs
 
     log!("Application started!");
     log!("The answer is {}", 42);
@@ -40,13 +40,9 @@ fn main() {
     for i in 0..5 {
         log!("Processing item number: {}", i);
     }
-
-    // Ensure all logs are flushed to disk.
-    // The logger will automatically shutdown when `_guard` goes out of scope (RAII),
-    // or you can call it manually: Log::shutdown();
 }
 ```
-*logs/app.log*
+*log.log*
 ```
 [2026-09-13T13:35:56.6214121Z]: Application started!
 [2026-09-13T13:35:56.6214709Z]: The answer is 42
@@ -55,6 +51,25 @@ fn main() {
 [2026-09-13T13:35:56.6214995Z]: Processing item number: 2
 [2026-09-13T13:35:56.6215062Z]: Processing item number: 3
 [2026-09-13T13:35:56.6215108Z]: Processing item number: 4
+```
+
+## Normal usage
+
+If you want to only set path and max size.
+
+```rust
+use x_log::{log, log_init_with};
+
+fn main() {
+    log_init_with!("logs/normal.log", 1000); // always place to main.rs
+
+    log!("Application started!");
+    log!("The answer is {}", 42);
+
+    for i in 0..5 {
+        log!("Processing item number: {}", i);
+    }
+}
 ```
 
 ## Advanced usage: Customizing via Builder
@@ -67,13 +82,15 @@ use x_log::{Log, log};
 
 fn main() {
     let backend = LogBackendBuilder::new()
-        .path("logs/custom.log")
+        .path("logs/advanced.log")
         .max_size(5 * 1024 * 1024)  // 5MB
         .buffer_size(32 * 1024)     // 32KB buffer
         .channel_size(500)          // Queue up to 500 messages
         .build();
 
-    let _guard = Log::init_with(backend);
+    let _guard = Log::init_with_backend(backend);
+    // or use log_init_with_backend!(backend)
+	// always place to main.rs
 	
 	log!("Application started!");
     log!("The answer is {}", 42);
@@ -83,7 +100,7 @@ fn main() {
     }
 
     // Ensure all logs are flushed to disk.
-    // The logger will automatically shut down when `_guard` goes out of scope (RAII),
+    // The logger will automatically shut down when `_guard` goes out of scope,
     // or you can call it manually: Log::shutdown();
 }
 ```
