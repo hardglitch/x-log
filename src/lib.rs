@@ -76,7 +76,7 @@ impl Drop for Log {
 /// ```
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => { $crate::Log::send(move || format!($($arg)*)); };
+    ($($arg:tt)*) => {{ $crate::Log::send(move || format!($($arg)*)); }};
 }
 
 /// Macro for eager logging. The expression is evaluated immediately in the current thread.
@@ -88,7 +88,7 @@ macro_rules! log {
 /// ```
 #[macro_export]
 macro_rules! log_eager {
-    ($($arg:tt)*) => { $crate::Log::send_owned(format!($($arg)*)); };
+    ($($arg:tt)*) => {{ $crate::Log::send_owned(format!($($arg)*)); }};
 }
 
 // Initialization macros for convenience in `main` functions.
