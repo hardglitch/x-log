@@ -53,7 +53,7 @@ async fn test_log_all() {
 		.channel_size(50)
 		.build();
 
-	let _guard = Log::init_with(backend);
+	let _guard = Log::init_with_backend(backend);
 
 	test_log();
 	test_async_log().await;

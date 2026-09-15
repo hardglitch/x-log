@@ -13,7 +13,16 @@ impl Log {
         Self
     }
 
-    pub fn init_with(backend: backend::LogBackend) -> Self {
+    pub fn init_with<T: AsRef<str>>(path: T, max_size: u64) -> Self {
+        let backend = backend::LogBackendBuilder::new()
+            .path(path)
+            .max_size(max_size)
+            .build();
+        backend.init();
+        Self
+    }
+
+    pub fn init_with_backend(backend: backend::LogBackend) -> Self {
         backend.init();
         Self
     }
