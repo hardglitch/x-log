@@ -60,10 +60,25 @@ impl Drop for Log {
 
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => {{ $crate::Log::send(move || format!($($arg)*)); }};
+    ($($arg:tt)*) => { $crate::Log::send(move || format!($($arg)*)); };
 }
 
 #[macro_export]
 macro_rules! log_eager {
-    ($($arg:tt)*) => {{ $crate::Log::send_owned(format!($($arg)*)); }};
+    ($($arg:tt)*) => { $crate::Log::send_owned(format!($($arg)*)); };
+}
+
+#[macro_export]
+macro_rules! log_init {
+    () => { let _guard = $crate::Log::init(); };
+}
+
+#[macro_export]
+macro_rules! log_init_with {
+    ($($arg:tt)*) => { let _guard = $crate::Log::init_with($($arg)*); };
+}
+
+#[macro_export]
+macro_rules! log_init_with_backend {
+    ($($arg:tt)*) => { let _guard = $crate::Log::init_with_backend($($arg)*); };
 }
