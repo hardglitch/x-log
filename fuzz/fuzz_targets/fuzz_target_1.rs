@@ -1,10 +1,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use log::{Log, log};
+use x_log::{Log, log};
+use x_log::backend::LogBackendBuilder;
 use arbitrary::Arbitrary;
 use std::sync::Once;
-use log::backend::LogBackendBuilder;
 
 static INIT: Once = Once::new();
 
