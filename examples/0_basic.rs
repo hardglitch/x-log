@@ -1,7 +1,7 @@
 use x_log::{log, log_init};
 
 fn main() {
-    log_init!(); // always place to main.rs
+    log_init!(); // Always place this in main.rs
 
     log!("Application started!");
     log!("The answer is {}", 42);

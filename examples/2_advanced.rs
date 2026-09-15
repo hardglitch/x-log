@@ -9,10 +9,10 @@ fn main() {
         .channel_size(500)          // Queue up to 500 messages
         .build();
 
+    // Always place this in main.rs.
     let _guard = Log::init_with_backend(backend);
-    // or use log_init_with_backend!(backend)
-    // always place to main.rs
-	
+    // or log_init_with_backend!(backend);
+
 	log!("Application started!");
     log!("The answer is {}", 42);
 
