@@ -13,7 +13,7 @@ fn main() {
     let _guard = Log::init_with_backend(backend);
     // or log_init_with_backend!(backend);
 
-	log!("Application started!");
+    log!("Application started!");
     log!("The answer is {}", 42);
 
     for i in 0..5 {
