@@ -6,20 +6,30 @@ use std::sync::{Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Global sender for dispatching log commands to the background thread.
 pub(crate) static LOG_SENDER: OnceLock<SyncSender<LogCommand>> = OnceLock::new();
+/// Global handle to manage the lifecycle of the logging background thread.
 static LOG_RECEIVER: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
+
 const BUFFER_SIZE: usize = 64 * 1024; // 64 kb
 const CHANNEL_SIZE: usize = 1024;
 
+/// Commands sent to the background logging thread.
 #[allow(dead_code)]
 pub(crate) enum LogCommand {
+    /// Execute a closure to generate a log string (lazy evaluation).
     Message(Box<dyn FnOnce() -> String + Send>),
+    /// Write an already formatted string (eager evaluation).
     MessageOwned(String),
+    /// Replace the current backend configuration.
     Update(LogBackend),
+    /// Force flush the buffer to disk.
     Flush,
+    /// Signal the background thread to finish processing and exit.
     Terminate,
 }
 
+/// The core engine responsible for file I/O and log rotation.
 #[derive(Debug)]
 pub struct LogBackend {
     pub(crate) path: PathBuf,
@@ -30,7 +40,9 @@ pub struct LogBackend {
     file_counter: usize,
     file_size: u64,
 }
+
 impl LogBackend {
+    /// Creates a new default backend writing to `log.log` in the current directory.
     #[allow(clippy::expect_used)]
     pub(crate) fn new() -> Self {
         let path = PathBuf::from("log.log");
@@ -46,7 +58,7 @@ impl LogBackend {
 
         Self {
             path,
-            max_size: 10 * 1024 * 1024,
+            max_size: 10 * 1024 * 1024, // Default 10MB
             writer: BufWriter::with_capacity(BUFFER_SIZE, file),
             buffer_size: BUFFER_SIZE,
             channel_size: CHANNEL_SIZE,
@@ -55,6 +67,7 @@ impl LogBackend {
         }
     }
 
+    /// Spawns the background worker thread and initializes global static senders.
     #[allow(clippy::expect_used)]
     pub(crate) fn init(mut self) {
         let (tx, rx) = sync_channel::<LogCommand>(self.channel_size);
@@ -81,6 +94,8 @@ impl LogBackend {
         LOG_RECEIVER.get_or_init(|| Mutex::new(Some(handle)));
     }
 
+    /// Renames the current file with a timestamp and creates a new log file.
+    #[inline]
     fn rotate(&mut self) -> std::io::Result<()> {
         self.writer.flush()?;
 
@@ -100,6 +115,7 @@ impl LogBackend {
         Ok(())
     }
 
+    /// Generates a unique filename for rotation using timestamp and counter.
     #[inline]
     fn get_new_path(&self) -> Option<PathBuf> {
         let stem = self.path.file_stem()?.to_str()?;
@@ -110,27 +126,29 @@ impl LogBackend {
         Some(new_path)
     }
 
+    /// Formats and writes the message to the internal buffer, handling rotation if necessary.
     #[inline]
     pub(crate) fn write(&mut self, msg: String) {
         let ts = Self::get_timestamp();
-        let msg_len = ts.len().saturating_add(msg.len()).saturating_add(3); // 3 for ": " and "\n"
+        // Calculate length including timestamp, separator, and newline
+        let msg_len = ts.len().saturating_add(msg.len()).saturating_add(3);
 
-        // 1. Check 1
+        // Check if the new message exceeds max file size before writing
         if self.file_size.saturating_add(msg_len as u64) >= self.max_size {
             self.flush();
             let _ = self.rotate();
         }
 
-        // 2. Write to buffer
         let _ = writeln!(self.writer, "[{}]: {}", ts, msg);
-
         self.file_size = self.file_size.saturating_add(msg_len as u64);
 
-        // 3. Check 2
+        // Proactive flush if buffer is getting full
         if self.writer.buffer().len() >= self.writer.capacity() {
             self.flush();
         }
     }
+
+    /// Returns current UTC time in RFC3339 format.
     #[inline]
     fn get_timestamp() -> String {
         time::OffsetDateTime::now_utc()
@@ -138,35 +156,40 @@ impl LogBackend {
             .unwrap_or_else(|_| "0000-00-00 00:00:00".to_string())
     }
 
+    /// Flushes the `BufWriter` to ensure data is written to the OS file buffer.
     #[inline]
     fn flush(&mut self) {
         if !self.writer.buffer().is_empty() {
             let _ = self.writer.flush();
+            // Update file size based on actual disk metadata
             if let Ok(metadata) = self.writer.get_ref().metadata() {
                 self.file_size = metadata.len();
             }
         }
     }
 
+    /// Gracefully shuts down the logger, flushing all buffers and joining the worker thread.
     #[inline]
     pub(crate) fn shutdown() {
         if let Some(tx) = LOG_SENDER.get() {
             let _ = tx.send(LogCommand::Terminate);
         }
         if let Some(mutex) = LOG_RECEIVER.get() &&
-           let Ok(mut guard) = mutex.lock() &&
-           let Some(handle) = guard.take()
+            let Ok(mut guard) = mutex.lock() &&
+            let Some(handle) = guard.take()
         {
             let _ = handle.join();
         }
     }
 }
+
 impl Drop for LogBackend {
     fn drop(&mut self) {
         self.flush();
     }
 }
 
+/// Builder pattern to configure `LogBackend` before initialization.
 #[derive(Debug, Default)]
 pub struct LogBackendBuilder {
     path: Option<PathBuf>,
@@ -174,26 +197,38 @@ pub struct LogBackendBuilder {
     buffer_size: Option<usize>,
     channel_size: Option<usize>,
 }
+
 impl LogBackendBuilder {
+    /// Creates a new builder instance.
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Sets the log file path.
     pub fn path<T: AsRef<str>>(mut self, path: T) -> Self {
         self.path = Some(PathBuf::from(path.as_ref()));
         self
     }
+
+    /// Sets the maximum size of a single log file in bytes before rotation occurs.
     pub fn max_size(mut self, size: u64) -> Self {
         self.max_size = Some(size);
         self
     }
+
+    /// Sets the internal `BufWriter` capacity in bytes.
     pub fn buffer_size(mut self, size: usize) -> Self {
         self.buffer_size = Some(size);
         self
     }
+
+    /// Sets the capacity of the command channel (number of pending messages).
     pub fn channel_size(mut self, size: usize) -> Self {
         self.channel_size = Some(size);
         self
     }
+
+    /// Constructs the `LogBackend` with provided settings or default values.
     #[allow(clippy::expect_used)]
     pub fn build(self) -> LogBackend {
         let path = self.path.unwrap_or(PathBuf::from("log.log"));
