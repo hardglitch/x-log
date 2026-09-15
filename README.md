@@ -20,8 +20,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-x-log = "0.7.5"
-# or x-log = { git = "https://github.com/hardglitch/x-log" }
+# planned: x-log = "0.7.5"
+x-log = { git = "https://github.com/hardglitch/x-log" }
 ```
 
 ## Basic usage
