@@ -32,7 +32,7 @@ To use the logger, initialize it once at the start of your application.
 use x_log::{log, log_init};
 
 fn main() {
-    log_init!(); // always place to main.rs
+    log_init!(); // Always place this in main.rs
 
     log!("Application started!");
     log!("The answer is {}", 42);
@@ -55,20 +55,20 @@ fn main() {
 
 ## Normal usage
 
-If you want to only set path and max size.
+If you want to only set the path and max size.
 
 ```rust
-use x_log::{log, log_init_with};
+use x_log::{log_eager, log_init_with};
+
+fn func(answer: &str) {
+    // log!("The answer is {answer}"); <-- This won't compile
+    // Use `log_eager!` macro to own data in main thread
+    log_eager!("The answer is {answer}");
+}
 
 fn main() {
-    log_init_with!("logs/normal.log", 1000); // always place to main.rs
-
-    log!("Application started!");
-    log!("The answer is {}", 42);
-
-    for i in 0..5 {
-        log!("Processing item number: {}", i);
-    }
+    log_init_with!("logs/normal.log", 1000); // Always place this in main.rs
+    func("some_str");
 }
 ```
 
@@ -88,10 +88,10 @@ fn main() {
         .channel_size(500)          // Queue up to 500 messages
         .build();
 
+    // Always place this in main.rs.
     let _guard = Log::init_with_backend(backend);
-    // or use log_init_with_backend!(backend)
-	// always place to main.rs
-	
+    // or log_init_with_backend!(backend);
+
 	log!("Application started!");
     log!("The answer is {}", 42);
 
